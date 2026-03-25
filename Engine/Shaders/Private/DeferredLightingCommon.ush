@@ -195,7 +195,8 @@ void ApplyContactShadowWithShadowTerms(
 		bool bHitCastContactShadow = false;
 		bool bHairNoShadowLight = ShadingModelID == SHADINGMODELID_HAIR && !LightData.ShadowedBits;
 		float HitDistance = ShadowRayCast( TranslatedWorldPosition, L, ContactShadowLength, 8, Dither, bHairNoShadowLight, bHitCastContactShadow );
-				
+		
+		// 实际应用接触阴影距离的地方
 		if ( HitDistance > 0.0 )
 		{
 			float ContactShadowOcclusion = bHitCastContactShadow ? LightData.ContactShadowCastingIntensity : LightData.ContactShadowNonCastingIntensity;

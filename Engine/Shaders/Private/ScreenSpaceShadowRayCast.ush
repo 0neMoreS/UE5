@@ -20,6 +20,8 @@ float CastScreenSpaceShadowRay(
 
 	const float3 RayStep = RayEnd - RayStart;
 
+	// 假设所有像素背后的物体，都至少有 RayLength 那么厚，这里只是估计，利用已有信息算不出精确的物体厚度
+	// 该厚度用于后续判断光线是否穿出物体后面，避免近处的物体遮挡远处的物体
 	const float4 RayDepthClip = RayStartClip + mul(float4(0, 0, RayLength, 0), View.ViewToClip);
 	const float3 RayDepth = RayDepthClip.xyz / RayDepthClip.w;
 
@@ -42,8 +44,10 @@ float CastScreenSpaceShadowRay(
 
 		// Avoid self-intersection with the start pixel (exact comparison due to point sampling depth buffer)
 		// Exception is made for hair for occluding transmitted light with non-shadow casting light
+		// 这里主要是为了避免在起始像素发生自相交，因为采样的是同一张深度图，所以如果深度值相同，说明是同一个像素，直接跳过就行了
 		if (SampleDepth != StartDepth || bHairNoShadowLight)
 		{
+			// 对于射线飞到了近处的物体后面，DepthDiff会变成很大的负数，这时就不应该算作命中，避免近处的物体遮挡了远处的物体
 			const float DepthDiff = SamplePos.z - SampleDepth;
 			const bool bHit = abs(DepthDiff + CompareTolerance) < CompareTolerance;
 
