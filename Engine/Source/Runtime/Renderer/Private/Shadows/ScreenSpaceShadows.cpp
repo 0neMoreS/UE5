@@ -23,7 +23,7 @@ enum class ContactShadowsMethod
 	BendSSS = 1,
 };
 
-static int32 GContactShadowsMethod = 0;
+static int32 GContactShadowsMethod = 1;
 static FAutoConsoleVariableRef CVarContactShadowsMethod(
 	TEXT("r.ContactShadows.Standalone.Method"),
 	GContactShadowsMethod,
