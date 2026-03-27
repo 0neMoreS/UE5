@@ -2341,6 +2341,17 @@ void FDeferredShadingSceneRenderer::RenderDeferredShadowProjections(
 		const FVisibleLightInfo& VisibleLightInfo = VisibleLightInfos[LightSceneInfo->Id];
 		RenderCapsuleDirectShadows(GraphBuilder, *LightSceneInfo, ScreenShadowMaskTexture, VisibleLightInfo.CapsuleShadowsToProject, bProjectingForForwardShading);
 
+		if (LightSceneInfo->Proxy && LightSceneInfo->Proxy->GetLightType() == LightType_Directional) {
+			RenderScreenSpaceShadows(
+				GraphBuilder,
+				SceneTextures,
+				Views,
+				LightSceneInfo,
+				bProjectingForForwardShading,
+				ScreenShadowMaskTexture
+			);
+		}
+
 		// Inject deep shadow mask for regular shadow map. When using virtual shadow map, it is directly handled in the shadow kernel.
 		if (HairStrands::HasViewHairStrandsData(Views))
 		{
