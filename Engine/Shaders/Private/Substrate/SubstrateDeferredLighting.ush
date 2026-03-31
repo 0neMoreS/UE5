@@ -123,15 +123,16 @@ FSubstrateDeferredLighting SubstrateDeferredLighting(
 			const uint  BSDFShadingModelID		= SubstrateGetLegacyShadingModels(BSDF);
 
 			// Now combine with shadow term that are dependent on the Substrate closures (screens space contact shadow) if necessary.
-			ApplyContactShadowWithShadowTerms(
-				SubstrateShadowTermInputParameters.SceneDepth,
-				BSDFShadingModelID,
-				BSDFContactShadowOpacity,
-				LightData,
-				SubstrateShadowTermInputParameters.TranslatedWorldPosition,
-				L,
-				SubstrateShadowTermInputParameters.Dither,
-				BSDFShadowTerms);
+			// 注释这个以关闭 Deferred Light 下的 Contact Shadow 计算
+			// ApplyContactShadowWithShadowTerms(
+			// 	SubstrateShadowTermInputParameters.SceneDepth,
+			// 	BSDFShadingModelID,
+			// 	BSDFContactShadowOpacity,
+			// 	LightData,
+			// 	SubstrateShadowTermInputParameters.TranslatedWorldPosition,
+			// 	L,
+			// 	SubstrateShadowTermInputParameters.Dither,
+			// 	BSDFShadowTerms);
 		}
 
 

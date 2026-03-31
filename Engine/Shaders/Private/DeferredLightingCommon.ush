@@ -247,7 +247,8 @@ void GetShadowTerms(
 	GetShadowTermsBase(SceneDepth, PrecomputedShadowFactors, LightData, LightAttenuation, OutShadow);
 
 	// Now combined with screens space contact shadow if necessary.
-	ApplyContactShadowWithShadowTerms (SceneDepth, ShadingModelID, ContactShadowOpacity, LightData, TranslatedWorldPosition, L, Dither, OutShadow);
+	// 注释这个以关闭 Deferred Light 下的 Contact Shadow 计算
+	// ApplyContactShadowWithShadowTerms (SceneDepth, ShadingModelID, ContactShadowOpacity, LightData, TranslatedWorldPosition, L, Dither, OutShadow);
 }
 
 float GetLocalLightAttenuation(

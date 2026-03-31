@@ -197,7 +197,7 @@ uint ThreadIndex = GroupThreadId.y * THREADGROUP_SIZEX + GroupThreadId.x;
     <p>Cascade + ContactShadow</p>
   </div>
   <div style="text-align: center;">
-    <img src="./blog_img/Cascade+Bend.png" style="width: 100%;" />
+    <img src="./blog_img/Cascade+DeferredLight+Bend.png" style="width: 100%;" />
     <p>Cascade + Bend</p>
   </div>
 </div>
@@ -210,16 +210,29 @@ uint ThreadIndex = GroupThreadId.y * THREADGROUP_SIZEX + GroupThreadId.x;
 
 2. FMobileSceneRenderer::RenderMobileShadowProjections，这里是 UE 移动端的调用点。调用链路：FMobileSceneRenderer::Render -> FMobileSceneRenderer::RenderMobileShadowProjections -> RenderScreenSpaceShadows
 
-注意在这边开启之后，LightRendering.cpp 那边就要关掉 Contact Shadow 的渲染，不然会重复渲染两遍 Contact Shadow
+注意在这边开启之后，LightRendering.cpp 那边就要关掉 Contact Shadow 的渲染，不然会重复渲染两遍 Contact Shadow，具体做法是把 ApplyContactShadowWithShadowTerms() 的两个调用点全部注释掉
+
+<div style="display: flex; justify-content: center; gap: 10px;">
+  <div style="text-align: center;">
+    <img src="./blog_img/Cascade+DeferredLight+Bend.png" style="width: 100%;" />
+    <p>Cascade + DeferredLight + Bend</p>
+  </div>
+  <div style="text-align: center;">
+    <img src="./blog_img/Cascade+PureBend.png" style="width: 100%;" />
+    <p>Cascade+PureBend</p>
+  </div>
+</div>
 
 ### 3.30
 
 RenderScreenSpaceShadowsBend 的具体实现
 
-首先调用原博客中提供的 bend_sss_cpu.h 进行数据准备，再调用到 ScreenSpaceShadow.usf 进行实际的计算。
+首先 CPU 侧调用原博客中提供的 bend_sss_cpu.h 进行数据准备，再推送给 GPU 调用到 ScreenSpaceShadow.usf 进行实际的计算。
 
-在 ScreenSpaceShadow.usf 中，如果在 ScreenSpaceShadows.cpp 开启了 OutEnvironment.SetDefine(TEXT("BEND_SSS"), 1)，则在 ScreenSpaceShadow.usf 会走 ScreenSpaceShadowsBendCS 的算法，用的还是原博客的 shader。
+在 ScreenSpaceShadow.usf 中，如果在 ScreenSpaceShadows.cpp 开启了 OutEnvironment.SetDefine(TEXT("BEND_SSS"), 1)，则在 ScreenSpaceShadow.usf 会走 ScreenSpaceShadowsBendCS 的算法，用的还是原博客的 bend_sss_gpu.h。
 
 如果没开，那就走 ScreenSpaceShadowsCS，和原始的 ContactShadow 一样，只不过是换成 Compute Shader 算的。
 
-是否是移动端好像都有实现？使用宏做了区分
+PC和移动端好像都有实现？使用宏做了区分
+
+Bend 算法主要两点，第一使用 compute shader 并行处理深度计算，第二使用双线性插值估计边缘？
