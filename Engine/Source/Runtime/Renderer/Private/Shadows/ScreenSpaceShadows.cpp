@@ -494,6 +494,8 @@ void RenderScreenSpaceShadows(
 		{
 			ScissorRect = View.ViewRect;
 		}
+		
+		// 这里一定返回整个屏幕空间的矩形
 
 		if (ScissorRect.Area() > 0)
 		{

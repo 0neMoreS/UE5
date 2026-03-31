@@ -139,6 +139,7 @@ void ScreenSpaceShadowsCS(
 
 	const float Dither = InterleavedGradientNoise(DispatchThreadId.xy + 0.5f, View.StateFrameIndexMod8);
 
+	// 实际应用接触阴影距离的地方
 	float2 HitUV;
 	float HitDistance = CastScreenSpaceShadowRay(OpaqueTranslatedWorldPosition, LightDirection, ActualContactShadowLength, 8, Dither, 2.0f, false, HitUV);
 
