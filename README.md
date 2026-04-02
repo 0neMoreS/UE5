@@ -198,7 +198,7 @@ uint ThreadIndex = GroupThreadId.y * THREADGROUP_SIZEX + GroupThreadId.x;
   </div>
   <div style="text-align: center;">
     <img src="./blog_img/Cascade+DeferredLight+Bend.png" style="width: 100%;" />
-    <p>Cascade + Bend</p>
+    <p>Cascade + DeferredLight + Bend</p>
   </div>
 </div>
 
@@ -218,7 +218,7 @@ uint ThreadIndex = GroupThreadId.y * THREADGROUP_SIZEX + GroupThreadId.x;
     <p>Cascade + DeferredLight + Bend</p>
   </div>
   <div style="text-align: center;">
-    <img src="./blog_img/Cascade+PureBend.png" style="width: 100%;" />
+    <img src="./blog_img/Cascade+Pure_Bend.png" style="width: 100%;" />
     <p>Cascade+PureBend</p>
   </div>
 </div>
@@ -236,3 +236,97 @@ RenderScreenSpaceShadowsBend 的具体实现
 PC和移动端好像都有实现？使用宏做了区分
 
 Bend 算法主要两点，第一使用 compute shader 并行处理深度计算，第二使用双线性插值估计边缘？
+
+### 4.2
+
+#### DispatchData 结构
+
+```cpp
+struct DispatchData {
+    int WaveCount[3];           // [X, Y, Z] 三维调度维度
+    int WaveOffset_Shader[2];   // [X, Y] 着色器中的偏移量
+};
+```
+
+WaveCount[3] - 计算着色器调度的三维工作组数量
+这个数组告诉GPU如何分派计算着色器：
+
+	WaveCount[0]：固定为 inWaveSize（通常是64）
+	
+	这是GPU波前的大小，表示一个波前有多少个线程。
+	
+	WaveCount[1]：水平方向的波前数量
+	
+	例如：值为 10 表示横向有10个波前（640个线程）。
+	
+	WaveCount[2]：垂直方向的波前数量
+	
+	例如：值为 8 表示纵向有8个波前（512个线程）。
+
+WaveOffset_Shader[2] - 相对于光源的像素偏移
+这个值传递给着色器，告诉每个调度“从哪里开始计算”：
+
+	WaveOffset_Shader[0]：X轴偏移（相对于光源位置）
+	
+	正数：光源右侧
+	
+	负数：光源左侧
+	
+	WaveOffset_Shader[1]：Y轴偏移（相对于光源位置）
+	
+	正数：光源下方
+	
+	负数：光源上方
+
+	WaveOffset_Shader = [-320, 128]
+	// 表示这个调度从光源左侧320像素、下方128像素处开始计算
+
+#### DispatchList 结构
+
+```cpp
+struct DispatchList {
+float LightCoordinate_Shader[4];  // 光源的完整坐标信息
+DispatchData Dispatch[8];         // 最多8个调度
+int DispatchCount;                // 实际需要的调度数量
+};
+```
+
+LightCoordinate_Shader[4] - 光源的屏幕空间坐标
+这是所有调度共享的全局数据，存储光源的关键信息。
+
+```cpp
+// [0] - 光源的屏幕X坐标（像素单位）
+result.LightCoordinate_Shader[0] = ((inLightProjection[0] / xy_light_w) * +0.5f + 0.5f) * (float)inViewportSize[0];
+// NDC坐标[-1,1] → 纹理坐标[0,1] → 像素坐标[0,width]
+
+// [1] - 光源的屏幕Y坐标（像素单位，注意Y轴翻转）
+result.LightCoordinate_Shader[1] = ((inLightProjection[1] / xy_light_w) * -0.5f + 0.5f) * (float)inViewportSize[1];
+// 注意：-0.5f 是因为屏幕Y轴方向与NDC相反
+
+// [2] - 光源的深度值
+result.LightCoordinate_Shader[2] = inLightProjection[3] == 0 ? 0 : (inLightProjection[2] / inLightProjection[3]);
+// 对于方向光（w=0）：深度为0
+// 对于点光源（w≠0）：z/w 得到标准化深度
+
+// [3] - 光源的方向标志
+result.LightCoordinate_Shader[3] = inLightProjection[3] > 0 ? 1 : -1;
+// +1：光源在相机前方
+// -1：光源在相机后方（或是方向光）
+
+例子：
+LightCoordinate_Shader = [1200.5, 540.2, 0.85, 1.0]
+// X = 1200.5 像素（屏幕右侧）
+// Y = 540.2  像素（垂直居中）
+// Z = 0.85   （深度值，0=远，1=近）
+// W = 1.0    （在相机前方）
+```
+
+Dispatch[8] - 调度数组
+最多存储8个 DispatchData，每个对应一次GPU调度。
+
+DispatchCount - 实际调度数量
+通常为 1-6个：
+
+	光源在屏幕外：1-2个调度（只需要覆盖可见的扇形区域）
+	
+	光源在屏幕内：4-6个调度（需要覆盖周围4个象限）
