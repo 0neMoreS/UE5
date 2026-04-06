@@ -224,6 +224,7 @@ struct DispatchParameters
 		float2 xy_delta = (start_xy - end_xy);
 
 		// Inverse the read order when reverse direction is true
+		// 计算当前 thread 应该读取的像素坐标
 		float thread_step = (float)(inGroupThreadID ^ (reverse_direction ? 0 : (WAVE_SIZE - 1)));
 
 		float2 pixel_xy = lerp(start_xy, end_xy, thread_step / (float)WAVE_SIZE);
@@ -239,6 +240,7 @@ struct DispatchParameters
 	#define READ_COUNT (SAMPLE_COUNT / WAVE_SIZE + 2)
 
 	// Common shared data
+	// 共享内存，存不同线程读出的深度
 	groupshared float DepthData[READ_COUNT * WAVE_SIZE];
 	groupshared bool LdsEarlyOut;
 
@@ -356,6 +358,8 @@ struct DispatchParameters
 		#endif
 
 			// Iterate to the next pixel along the ray. This will be WAVE_SIZE pixels along the ray...
+			
+			// 跳到该线程的下一个采样点
 			pixel_xy += xy_delta * direction;
 		}
 
@@ -409,6 +413,7 @@ struct DispatchParameters
 			}
 
 			// Store the depth values in groupshared
+			// 把读出的深度存储到共享内存
 			int idx = (i * WAVE_SIZE) + inGroupThreadID.x;
 			DepthData[idx] = stored_depth;
 		#if DEBUG_HIT_UV
