@@ -336,3 +336,9 @@ DispatchCount - 实际调度数量
 阅读 GPU 侧实现，ComputeWavefrontExtents 用于计算每个运行组和每个线程应该开始采样的位置，后续深度采样在 WriteScreenSpaceShadow 中实现。先并行采样深度到共享内存 DepthData 中，其中每个组负责一块区域，每个线程负责这个区域中的一个（或者若干个固定间隔）像素，并行采样能大幅降低读显存的压力
 
 TODO：阴影计算的实现？
+
+### 4.13
+
+编辑源码开放 IgnoreEdgePixels 的控制台参数，使用 r.ContactShadows.Bend.IgnoreEdgePixels 配置，设置为 True 之后可以缓解摩尔纹现象
+
+TODO：阴影计算的实现？摩尔纹的具体成因？为什么开启之后就能缓解？

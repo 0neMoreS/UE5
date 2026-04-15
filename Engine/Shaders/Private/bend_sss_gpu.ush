@@ -127,6 +127,7 @@ struct DispatchParameters
 
 
 	// Set sensible starting tuning values
+	// 这个函数在 ScreenSpaceShadow.usf 中被调用，包括从 CPU 传过来的参数，都在 ScreenSpaceShadow.usf 中被重新映射
 	void SetDefaults()
 	{
 		SurfaceThickness			= 0.005;

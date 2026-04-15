@@ -41,6 +41,14 @@ static FAutoConsoleVariableRef CVarBendShadowsOverrideSurfaceThickness(
 	ECVF_RenderThreadSafe
 );
 
+static int32 GBendShadowsIgnoreEdgePixels = 0;
+static FAutoConsoleVariableRef CVarBendShadowsIgnoreEdgePixels(
+	TEXT("r.ContactShadows.Bend.IgnoreEdgePixels"),
+	GBendShadowsIgnoreEdgePixels,
+	TEXT("If non-zero, edge pixels detected in Bend SSS are skipped from shadow casting."),
+	ECVF_RenderThreadSafe
+);
+
 enum class EContactShadowsIntensityMode
 {
 	PrimitiveFlag,
@@ -153,6 +161,7 @@ class FScreenSpaceShadowsBendCS : public FGlobalShader
 		SHADER_PARAMETER(FVector2f, InvDepthTextureSize)
 		SHADER_PARAMETER(FVector4f, LightCoordinate)
 		SHADER_PARAMETER(FIntVector, WaveOffset)
+		SHADER_PARAMETER(uint32, IgnoreEdgePixels)
 	END_SHADER_PARAMETER_STRUCT()
 
 	class FIntensityModeDim : SHADER_PERMUTATION_ENUM_CLASS("DIM_INTENSITY_MODE", EContactShadowsIntensityMode);
@@ -432,6 +441,8 @@ void RenderScreenSpaceShadowsBend(
 			PassParameters->LightCoordinate = FVector4f(DispatchList.LightCoordinate_Shader[0], DispatchList.LightCoordinate_Shader[1], DispatchList.LightCoordinate_Shader[2], DispatchList.LightCoordinate_Shader[3]);
 			PassParameters->WaveOffset = FIntVector(Dispatch.WaveOffset_Shader[0], Dispatch.WaveOffset_Shader[1], 0);
 
+			PassParameters->IgnoreEdgePixels = GBendShadowsIgnoreEdgePixels ? 1u : 0u;
+			
 			FScreenSpaceShadowsBendCS::FPermutationDomain PermutationVector;
 			PermutationVector.Set<FScreenSpaceShadowsBendCS::FIntensityModeDim>((EContactShadowsIntensityMode)GContactShadowsIntensityMode);
 
