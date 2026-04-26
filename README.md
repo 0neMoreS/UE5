@@ -235,7 +235,7 @@ RenderScreenSpaceShadowsBend 的具体实现
 
 PC和移动端好像都有实现？使用宏做了区分
 
-Bend 算法主要两点，第一使用 compute shader 并行处理深度计算，第二使用双线性插值估计边缘？
+Bend 算法主要两点，第一使用 compute shader 并行处理深度计算，第二使用双边滤波估计边缘？
 
 ### 4.2
 
@@ -342,3 +342,38 @@ TODO：阴影计算的实现？
 编辑源码开放 IgnoreEdgePixels 的控制台参数，使用 r.ContactShadows.Bend.IgnoreEdgePixels 配置，设置为 True 之后可以缓解摩尔纹现象
 
 TODO：阴影计算的实现？摩尔纹的具体成因？为什么开启之后就能缓解？
+
+### 4.15
+
+shadowing_depth 最后会写入 LDS DepthData 
+
+sampling_depth 感觉不需要单独开一个数组，是不是为了内存对齐？
+
+### 4.26
+
+本质跟原本的 Contact Shadow 思路是一致的，需要对屏幕空间逐像素向光源方向（Bend 只处理方向光）做 ray marching，比深度，算交点，其中光照方向由 CPU 分 dispatch 的时候决定，（其 artifact 还是由于物体厚度信息拿不到导致）
+
+对屏幕上每一个像素都计算一次沿着光线方向的遮挡情况，sampling_depth[0] 存像素起始深度，后续沿着光照方向的深度在共享内存 DepthData 中取出
+
+具体到比较过程，我们先要明确 DepthData 中的数据含义，再看比较算法，最后确定导致逆光时 artifact 的原因
+
+- DepthData的数据含义：
+
+	在 bend SSS 的实现中，DepthData 并不是直接把深度缓冲搬进共享内存，而是经历了“采样 → 边缘检测 → 归一化”三步：每个线程先从 DepthTexture 读取相邻深度 depths.x 和 depths.y 来判断边缘，如果是边缘，根据 IgnoreEdgePixels 来判断是直接忽略边缘还是用点采样记录边缘深度；如果不是边缘，直接双线性插值做一个过滤；为了避免深度缓冲中的非线性深度值，随后把它变换为光空间下的深度再写入 DepthData，公式是 stored_depth = (shadowing_depth[i] - LightCoordinate.z) / sample_distance[i] 。这一步具体的数学原理是先减去 LightCoordinate.z 把深度转成相对光源参考量，再除以 sample_distance 消除不同采样距离带来的透视尺度差异，使来自不同线程、不同距离的样本都落到同一可比较坐标系中，后续 start_depth 与 DepthData[...] 的 depth_delta 比较才稳定且有一致物理意义
+
+
+- 比较算法：
+
+	首先是开头算了一个 depth_scale，这个变量实际上是把用户定义的 SurfaceThickness 参数归一化到比较空间，使得不同位置的像素都以 SurfaceThickness 为参考来估计物体厚度。接下来，在光线方向上用 abs(start_depth - DepthData[sample_index + i] * depth_scale)，在考虑 SurfaceThickness 的同时不断计算最小的 depth_delta，（将其打包到 depth_delta_packed 中是因为 min 的时候可以顺便把 index 顺序也考虑进去，在相同 depth 的情况下，index 更小的优先）最后把这个最小的 depth_delta 写入到输出的阴影值中。 下来，本质就是用沿光线方向各个像素中准确的前表面深度 + 根据 SurfaceThickness 估计出的后表面深度做求交判断
+
+
+- 逆光 artifact 原因：
+
+	作为对比，顺光时不会有 artifact，这主要是因为顺光时产生阴影的就是当前像素内物体的前表面，此时在计算 depth_delta 时用到的数据就是准确的像素前表面深度，所以不会产生 artifact。而逆光时出问题，就是因为 depth_delta 要判断相交，理论上需要准确的后表面深度，而后表面深度信息在屏幕空间无法还原，所以导致了 artifact
+
+
+- 可行的解决方案：
+
+	1. PPT中提到的 depth bias texture
+	
+	2. 在逆光区（用 N dot L 判断）降低 SurfaceThickness

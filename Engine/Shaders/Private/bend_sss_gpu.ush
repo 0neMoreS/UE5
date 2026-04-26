@@ -187,7 +187,7 @@ struct DispatchParameters
 	// Also returns the delta to get to the next pixel after WAVE_COUNT pixels along the ray
 	static void ComputeWavefrontExtents(DispatchParameters inParameters, int3 inGroupID, uint inGroupThreadID, out float2 outDeltaXY, out float2 outPixelXY, out float outPixelDistance, out bool outMajorAxisX)
 	{
-		int2 xy = inGroupID.yz * WAVE_SIZE + inParameters.WaveOffset.xy;
+		int2 xy = inGroupID.yz * WAVE_SIZE + inParameters.WaveOffset.xy; // GroupID 的 y/z 维先按 WAVE_SIZE 放大成块坐标，最后计算当前 wave 对应的二维起始坐标
 
 		//integer light position / fractional component
 		float2 light_xy = floor(inParameters.LightCoordinate.xy) + 0.5;
@@ -218,23 +218,25 @@ struct DispatchParameters
 		// back in to screen direction
 		float2 start_xy = xy_f + light_xy;
 
-		// For the very inner most ring, we need to interpolate to a pixel centered UV, so the UV->pixel rounding doesn't skip output pixels
+		// For the very inner ring, we need to interpolate to a pixel centered UV, so the UV->pixel rounding doesn't skip output pixels
 		float2 end_xy = lerp(inParameters.LightCoordinate.xy, start_xy, (major_axis_end + ma_light_frac) / (major_axis_start + ma_light_frac));
 
 		// The major axis should be a round number
 		float2 xy_delta = (start_xy - end_xy);
 
 		// Inverse the read order when reverse direction is true
-		// 计算当前 thread 应该读取的像素坐标
+		// reverse_direction == true：异或 0，不变
+		// reverse_direction == false：异或 WAVE_SIZE-1（64 时就是 63），顺序翻转（0 -> 63, 1 -> 62, ...）
 		float thread_step = (float)(inGroupThreadID ^ (reverse_direction ? 0 : (WAVE_SIZE - 1)));
 
 		float2 pixel_xy = lerp(start_xy, end_xy, thread_step / (float)WAVE_SIZE);
 		float pixel_distance = major_axis_start - thread_step + ma_light_frac;
 
-		outPixelXY = pixel_xy;
-		outPixelDistance = pixel_distance;
-		outDeltaXY = xy_delta;
-		outMajorAxisX = x_axis_major;
+		outPixelXY = pixel_xy; // 当前线程 ray marching 起始位置的屏幕像素坐标，由光源位置决定
+		outPixelDistance = pixel_distance; // ？
+		outDeltaXY = xy_delta; // Wavefront 推进到下一段时的二维增量，决定了 ray marching 方向
+		outMajorAxisX = x_axis_major; // 主轴是否是 X 轴（后续用于采样/插值策略）
+		// 从光源出发，向四周做 ray marching，检测深度信息
 	}
 
 	// Number of bilinear sample reads performed per-thread
@@ -297,6 +299,7 @@ struct DispatchParameters
 			float minor_axis = x_axis_major ? pixel_xy.y : pixel_xy.x;
 
 			// If a pixel has been detected as an edge, then optionally (inParameters.IgnoreEdgePixels) don't include it in the shadow
+			// 触发该值就不会被算成遮挡
 			const float edge_skip = 1e20;	// if edge skipping is enabled, apply an extreme value/blend on edge samples to push the value out of range
 
 			float2 depths;
@@ -312,6 +315,7 @@ struct DispatchParameters
 
 			// HLSL enforces that a pixel offset is a compile-time constant, which isn't strictly required (and can sometimes be a bit faster)
 			// So this fallback will use a manual uv offset instead
+			// 采样相邻的两个点
 			depths.x = inParameters.DepthTexture.SampleLevel(inParameters.PointBorderSampler, read_xy * inParameters.InvDepthTextureSize, 0).r;
 			depths.y = inParameters.DepthTexture.SampleLevel(inParameters.PointBorderSampler, (read_xy + offset_xy) * inParameters.InvDepthTextureSize, 0).r;
 		#else
@@ -326,6 +330,7 @@ struct DispatchParameters
 			depth_thickness_scale[i] = abs(inParameters.FarDepthValue - depths.x);
 
 			// If depth variance is more than a specific threshold, then just use point filtering
+			// 为 true 就说明该像素处在边缘上
 			bool use_point_filter = abs(depths.x - depths.y) > depth_thickness_scale[i] * inParameters.BilinearThreshold;
 
 			// Store for debug output when inParameters.DebugOutputEdgeMask is true
