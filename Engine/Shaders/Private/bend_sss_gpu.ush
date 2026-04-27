@@ -86,8 +86,13 @@ struct DispatchParameters
 	// These values will require manual tuning.
 	// All shadow computation is performed in non-linear depth space (not in world space), so tuned value choices will depend on scene depth distribution (as determined by the Projection Matrix setup).
 
-	float SurfaceThickness;				// This is the assumed thickness of each pixel for shadow-casting, measured as a percentage of the difference in non-linear depth between the sample and FarDepthValue.
+	float SurfaceThickness;				// This is the assumed thickness of each pixel for shadow-casting, measured as a percentage of the difference in non-linear depth between the sample and far clip depth.
 										// Recommended starting value: 0.005 (0.5%)
+
+	float3 LightDirectionWS;			// Directional light direction in world space. Used for backlit detection.
+	float BacklitThicknessScale;		// Thickness scale when fully backlit. Values > 1 reduce effective thickness.
+	float BacklitNoLStart;				// NoL threshold where backlit adaptation starts.
+	float BacklitNoLEnd;				// NoL threshold where backlit adaptation reaches max.
 
 	float BilinearThreshold;			// Percentage threshold for determining if the difference between two depth values represents an edge, and should not perform interpolation.
 										// To tune this value, set 'DebugOutputEdgeMask' to true to visualize where edges are being detected.
@@ -133,6 +138,10 @@ struct DispatchParameters
 	void SetDefaults()
 	{
 		SurfaceThickness			= 0.005;
+		LightDirectionWS			= float3(0,0,1);
+		BacklitThicknessScale		= 1.0;
+		BacklitNoLStart				= 0.1;
+		BacklitNoLEnd				= -0.3;
 		BilinearThreshold			= 0.02;
 		ShadowContrast				= 4;
 		IgnoreEdgePixels			= false;
@@ -151,8 +160,8 @@ struct DispatchParameters
 	int2 WaveOffset;					// Values stored in DispatchData::WaveOffset_Shader by BuildDispatchList()
 
 	// Renderer Specific Values:
-	float FarDepthValue;				// Set to the Depth Buffer Value for the far clip plane, as determined by renderer projection matrix setup (typically 0).
-	float NearDepthValue;				// Set to the Depth Buffer Value for the near clip plane, as determined by renderer projection matrix setup (typically 1).
+	float FarDeviceDepthValue;			// Set to the Depth Buffer Value for the far clip plane, as determined by renderer projection matrix setup (typically 0).
+	float NearDeviceDepthValue;			// Set to the Depth Buffer Value for the near clip plane, as determined by renderer projection matrix setup (typically 1).
 
 	// Sampling data:
 	float2 InvDepthTextureSize;			// Inverse of the texture dimensions for 'DepthTexture' (used to convert from pixel coordinates to UVs)
@@ -161,7 +170,7 @@ struct DispatchParameters
 
 	Texture2D DepthTexture;				// Depth Buffer Texture (rasterized non-linear depth)
 
-	SamplerState PointBorderSampler;	// A point sampler, with Wrap Mode set to Clamp-To-Border-Color (D3D12_TEXTURE_ADDRESS_MODE_BORDER), and Border Color set to "FarDepthValue" (typically zero), or some other far-depth value out of DepthBounds.
+	SamplerState PointBorderSampler;	// A point sampler, with Wrap Mode set to Clamp-To-Border-Color (D3D12_TEXTURE_ADDRESS_MODE_BORDER), and Border Color set to a far-depth value out of DepthBounds.
 										// If you have issues where invalid shadows are appearing from off-screen, it is likely that this sampler is not correctly setup
 };
 
@@ -285,7 +294,7 @@ struct DispatchParameters
 	#endif
 
 		const float direction = -inParameters.LightCoordinate.w;
-		const float z_sign = inParameters.NearDepthValue > inParameters.FarDepthValue ? -1 : +1;
+		const float z_sign = inParameters.NearDeviceDepthValue > inParameters.FarDeviceDepthValue ? -1 : +1;
 		
 		const float2 start_xy = pixel_xy;
 
@@ -331,7 +340,7 @@ struct DispatchParameters
 		#endif
 
 			// Depth thresholds (bilinear/shadow thickness) are based on a fractional ratio of the difference between sampled depth and the far clip depth
-			depth_thickness_scale[i] = abs(inParameters.FarDepthValue - depths.x);
+			depth_thickness_scale[i] = abs(inParameters.FarDeviceDepthValue - depths.x);
 
 			// If depth variance is more than a specific threshold, then just use point filtering
 			// 为 true 就说明该像素处在边缘上
@@ -442,7 +451,7 @@ struct DispatchParameters
 
 		// lerp away from far depth by a tiny fraction?
 		if (inParameters.UsePrecisionOffset)
-			start_depth = lerp(start_depth, inParameters.FarDepthValue, -1.0 / 0xFFFF);
+			start_depth = lerp(start_depth, inParameters.FarDeviceDepthValue, -1.0 / 0xFFFF);
 
 		// perspective correct the depth
 		start_depth = (start_depth - inParameters.LightCoordinate.z) / sample_distance[0];
@@ -461,10 +470,24 @@ struct DispatchParameters
 		// This is the inverse of how large the shadowing window is for the projected sample data. 
 		// All values in the LDS sample list are scaled by 1.0 / sample_distance, such that all light directions become parallel.
 		// The multiply by sample_distance[0] here is to compensate for the projection divide in the data.
-		// The 1.0 / inParameters.SurfaceThickness is to adjust user selected thickness. So a 0.5% thickness will scale depth values from [0,1] to [0,200]. The shadow window is always 1 wide.
+		// The 1.0 / SurfaceThickness term adjusts user selected thickness. So a 0.5% thickness will scale depth values from [0,1] to [0,200]. The shadow window is always 1 wide.
 		// 1.0 / depth_thickness_scale[0] is because SurfaceThickness is percentage of remaining depth between the sample and the far clip - not a percentage of the full depth range.
-		// The min() function is to make sure the window is a minimum width when very close to the light. The +direction term will bias the result so the pixel at the very center of the light is either fully lit or shadowed
-		float depth_scale = min(sample_distance[0] + direction, 1.0 / inParameters.SurfaceThickness) * sample_distance[0] / depth_thickness_scale[0];
+		// The min() function is to make sure the window is a minimum width when very close to the light. The +direction term will bias the result so the pixel at the very center of the light is either fully lit or shadowed.
+		// Surface thickness is adaptively reduced by a backlit factor.
+		float backlit = 0.0f;
+
+#if SHADING_PATH_DEFERRED
+		const float2 write_uv = (write_xy + 0.5f) * inParameters.InvDepthTextureSize;
+		const float3 world_normal = normalize(GetGBufferData(write_uv).WorldNormal);
+		const float3 to_light_direction = -normalize(inParameters.LightDirectionWS);
+		const float NoL = dot(world_normal, to_light_direction);
+		const float NoLRange = max(inParameters.BacklitNoLStart - inParameters.BacklitNoLEnd, 1e-4f);
+		backlit = saturate((inParameters.BacklitNoLStart - NoL) / NoLRange);
+#endif
+
+		const float thickness_scale = max(lerp(1.0f, inParameters.BacklitThicknessScale, backlit), 1e-4f);
+		const float adaptive_surface_thickness = max(inParameters.SurfaceThickness / thickness_scale, 1e-5f);
+		float depth_scale = min(sample_distance[0] + direction, 1.0 / adaptive_surface_thickness) * sample_distance[0] / depth_thickness_scale[0];
 
 		start_depth = start_depth * depth_scale - z_sign;
 		

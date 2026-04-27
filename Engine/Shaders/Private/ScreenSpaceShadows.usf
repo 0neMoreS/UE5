@@ -7,6 +7,7 @@
 #if BEND_SSS
 
 #include "/Engine/Public/Platform.ush"
+#include "DeferredShadingCommon.ush"
 
 #define INTENSITY_MODE_PRIMITIVE_FLAG 0
 #define INTENSITY_MODE_DEPTH_BASED_APPROXIMATION 1
@@ -27,7 +28,17 @@ int3 WaveOffset;
 RWTexture2D<float> OutputTexture;
 SamplerState PointBorderSampler;
 
-DispatchParameters SetupBendDispatchParameters(Texture2D DepthTexture, float NearDepthVal, float FarDepthVal, float SurfaceThickness, uint IgnoreEdgePixelsParam, uint UseHalfPixelOffsetParam)
+DispatchParameters SetupBendDispatchParameters(
+	Texture2D DepthTexture,
+	float NearDepthVal,
+	float FarDepthVal,
+	float SurfaceThickness,
+	float3 LightDirectionWS,
+	float BacklitThicknessScale,
+	float BacklitNoLStart,
+	float BacklitNoLEnd,
+	uint IgnoreEdgePixelsParam,
+	uint UseHalfPixelOffsetParam)
 {
 	DispatchParameters Parameters;
 	Parameters.SetDefaults();
@@ -35,8 +46,8 @@ DispatchParameters SetupBendDispatchParameters(Texture2D DepthTexture, float Nea
 	Parameters.LightCoordinate = LightCoordinate;
 	Parameters.WaveOffset = WaveOffset.xy;
 
-	Parameters.FarDepthValue = FarDepthVal;
-	Parameters.NearDepthValue = NearDepthVal;
+	Parameters.FarDeviceDepthValue = FarDepthVal;
+	Parameters.NearDeviceDepthValue = NearDepthVal;
 
 	Parameters.InvDepthTextureSize = InvDepthTextureSize;
 
@@ -44,6 +55,10 @@ DispatchParameters SetupBendDispatchParameters(Texture2D DepthTexture, float Nea
 	Parameters.PointBorderSampler = PointBorderSampler;
 
 	Parameters.SurfaceThickness = SurfaceThickness;
+	Parameters.LightDirectionWS = LightDirectionWS;
+	Parameters.BacklitThicknessScale = BacklitThicknessScale;
+	Parameters.BacklitNoLStart = BacklitNoLStart;
+	Parameters.BacklitNoLEnd = BacklitNoLEnd;
 	
 	Parameters.IgnoreEdgePixels = (IgnoreEdgePixelsParam != 0);
 	Parameters.UseHalfPixelOffset = (UseHalfPixelOffsetParam != 0);
@@ -58,7 +73,6 @@ DispatchParameters SetupBendDispatchParameters(Texture2D DepthTexture, float Nea
 #include "Common.ush"
 #include "SceneTexturesCommon.ush"
 #include "ComputeShaderUtils.ush"
-
 #include "DeferredShadingCommon.ush"
 
 #ifdef UPSAMPLE_PASS
@@ -81,6 +95,9 @@ float ContactShadowNonCastingIntensity;
 float ContactShadowIntensityFadeStart;
 float ContactShadowIntensityFadeOneOverLength;
 float SurfaceThickness;
+float BacklitThicknessScale;
+float BacklitNoLStart;
+float BacklitNoLEnd;
 uint IgnoreEdgePixels;
 uint UseHalfPixelOffset;
 
@@ -170,7 +187,17 @@ void ScreenSpaceShadowsBendCS(
 #else
 	Texture2D DepthTexture = SceneTexturesStruct.SceneDepthTexture;
 #endif
-	DispatchParameters Parameters = SetupBendDispatchParameters(DepthTexture, NearDepthValue, FarDepthValue, SurfaceThickness, IgnoreEdgePixels, UseHalfPixelOffset);
+	DispatchParameters Parameters = SetupBendDispatchParameters(
+		DepthTexture,
+		NearDepthValue,
+		FarDepthValue,
+		SurfaceThickness,
+		LightDirection,
+		BacklitThicknessScale,
+		BacklitNoLStart,
+		BacklitNoLEnd,
+		IgnoreEdgePixels,
+		UseHalfPixelOffset);
 
 	float Result;
 	int2 ResultXY;

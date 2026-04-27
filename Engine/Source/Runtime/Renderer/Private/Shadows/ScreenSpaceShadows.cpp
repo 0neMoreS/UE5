@@ -41,6 +41,30 @@ static FAutoConsoleVariableRef CVarBendShadowsOverrideSurfaceThickness(
 	ECVF_RenderThreadSafe
 );
 
+static float GBendShadowsBacklitThicknessScale = 2.0f;
+static FAutoConsoleVariableRef CVarBendShadowsBacklitThicknessScale(
+	TEXT("r.ContactShadows.Bend.BacklitThicknessScale"),
+	GBendShadowsBacklitThicknessScale,
+	TEXT("Backlit thickness scale used by Bend SSS when backlit factor reaches 1. Values > 1 reduce effective thickness."),
+	ECVF_RenderThreadSafe
+);
+
+static float GBendShadowsBacklitNoLStart = 0.1f;
+static FAutoConsoleVariableRef CVarBendShadowsBacklitNoLStart(
+	TEXT("r.ContactShadows.Bend.BacklitNoLStart"),
+	GBendShadowsBacklitNoLStart,
+	TEXT("NoL threshold where Bend SSS starts increasing thickness in backlit areas."),
+	ECVF_RenderThreadSafe
+);
+
+static float GBendShadowsBacklitNoLEnd = -0.3f;
+static FAutoConsoleVariableRef CVarBendShadowsBacklitNoLEnd(
+	TEXT("r.ContactShadows.Bend.BacklitNoLEnd"),
+	GBendShadowsBacklitNoLEnd,
+	TEXT("NoL threshold where Bend SSS reaches full backlit thickness scale."),
+	ECVF_RenderThreadSafe
+);
+
 static int32 GBendShadowsIgnoreEdgePixels = 0;
 static FAutoConsoleVariableRef CVarBendShadowsIgnoreEdgePixels(
 	TEXT("r.ContactShadows.Bend.IgnoreEdgePixels"),
@@ -164,6 +188,9 @@ class FScreenSpaceShadowsBendCS : public FGlobalShader
 		SHADER_PARAMETER(float, ContactShadowIntensityFadeStart)
 		SHADER_PARAMETER(float, ContactShadowIntensityFadeOneOverLength)
 		SHADER_PARAMETER(float, SurfaceThickness)
+		SHADER_PARAMETER(float, BacklitThicknessScale)
+		SHADER_PARAMETER(float, BacklitNoLStart)
+		SHADER_PARAMETER(float, BacklitNoLEnd)
 		SHADER_PARAMETER(FIntRect, ScissorRectMinAndSize)
 		SHADER_PARAMETER(uint32, DownsampleFactor)
 		SHADER_PARAMETER(FVector2f, InvDepthTextureSize)
@@ -446,6 +473,9 @@ void RenderScreenSpaceShadowsBend(
 			PassParameters->ContactShadowIntensityFadeStart = GContactShadowsIntensityFadeStart;
 			PassParameters->ContactShadowIntensityFadeOneOverLength = 1.0f / GContactShadowsIntensityFadeLength;
 			PassParameters->SurfaceThickness = GBendShadowsOverrideSurfaceThickness;
+			PassParameters->BacklitThicknessScale = GBendShadowsBacklitThicknessScale;
+			PassParameters->BacklitNoLStart = GBendShadowsBacklitNoLStart;
+			PassParameters->BacklitNoLEnd = GBendShadowsBacklitNoLEnd;
 
 			PassParameters->LightCoordinate = FVector4f(DispatchList.LightCoordinate_Shader[0], DispatchList.LightCoordinate_Shader[1], DispatchList.LightCoordinate_Shader[2], DispatchList.LightCoordinate_Shader[3]);
 			PassParameters->WaveOffset = FIntVector(Dispatch.WaveOffset_Shader[0], Dispatch.WaveOffset_Shader[1], 0);
