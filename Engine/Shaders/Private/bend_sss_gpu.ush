@@ -60,7 +60,7 @@
 
 #if defined(__HLSL_VERSION) || defined(__hlsl_dx_compiler) || 1
 	
-	#define USE_HALF_PIXEL_OFFSET 1		// Apply a 0.5 texel offset when sampling a texture. Toggle this macro if the output shadow has odd, regular grid-like artefacts.
+	// Half-pixel sampling offset is controlled at runtime via DispatchParameters.UseHalfPixelOffset.
 
 	// HLSL enforces that a pixel offset in a Sample() call must be a compile time constant, which isn't always required - and in some cases can give a small perf boost if used.
 	#define USE_UV_PIXEL_BIAS 1			// Use Sample(uv + bias) instead of Sample(uv, bias)
@@ -102,6 +102,8 @@ struct DispatchParameters
 										// Setting this value to true would mean that those pixels would not cast a shadow, however it can also thin out otherwise valid shadows, especially on foliage edges.
 										// Recommended starting value: false, unless typical scenes have numerous large flat surfaces, in which case true.
 
+	bool UseHalfPixelOffset;			// Apply a 0.5 texel offset when sampling depth.
+
 	bool UsePrecisionOffset;			// A small offset is applied to account for an imprecise depth buffer (recommend off)
 
 
@@ -134,6 +136,7 @@ struct DispatchParameters
 		BilinearThreshold			= 0.02;
 		ShadowContrast				= 4;
 		IgnoreEdgePixels			= false;
+		UseHalfPixelOffset			= true;
 		UsePrecisionOffset			= false;
 		BilinearSamplingOffsetMode	= false;
 		DebugOutputEdgeMask			= false;
@@ -154,7 +157,7 @@ struct DispatchParameters
 	// Sampling data:
 	float2 InvDepthTextureSize;			// Inverse of the texture dimensions for 'DepthTexture' (used to convert from pixel coordinates to UVs)
 										// If 'PointBorderSampler' is an Unnormalized sampler, then this value can be hard-coded to 1.
-										// The 'USE_HALF_PIXEL_OFFSET' macro might need to be defined if sampling at exact pixel coordinates isn't precise (e.g., if odd patterns appear in the shadow).
+										// Toggle 'UseHalfPixelOffset' if sampling at exact pixel coordinates isn't precise (e.g., if odd patterns appear in the shadow).
 
 	Texture2D DepthTexture;				// Depth Buffer Texture (rasterized non-linear depth)
 
@@ -305,9 +308,10 @@ struct DispatchParameters
 			float2 depths;
 			float bilinear = frac(minor_axis) - 0.5;
 
-		#if USE_HALF_PIXEL_OFFSET
-			read_xy += 0.5;
-		#endif
+			if (inParameters.UseHalfPixelOffset)
+			{
+				read_xy += 0.5;
+			}
 
 		#if USE_UV_PIXEL_BIAS
 			float bias = bilinear > 0 ? 1 : -1;
@@ -591,9 +595,10 @@ struct DispatchParameters
 
 		#if TRACK_HIT_UV
 			float2 hit_xy = floor(start_xy + hit_index * (xy_delta * direction) / WAVE_SIZE);
-			#if USE_HALF_PIXEL_OFFSET
+			if (inParameters.UseHalfPixelOffset)
+			{
 				hit_xy += 0.5;
-			#endif
+			}
 				outHitUV = hit_xy * inParameters.InvDepthTextureSize;
 
 			#if DEBUG_HIT_UV

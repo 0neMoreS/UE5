@@ -49,6 +49,14 @@ static FAutoConsoleVariableRef CVarBendShadowsIgnoreEdgePixels(
 	ECVF_RenderThreadSafe
 );
 
+static int32 GBendShadowsUseHalfPixelOffset = 1;
+static FAutoConsoleVariableRef CVarBendShadowsUseHalfPixelOffset(
+	TEXT("r.ContactShadows.Bend.UseHalfPixelOffset"),
+	GBendShadowsUseHalfPixelOffset,
+	TEXT("If non-zero, Bend SSS applies a 0.5 texel offset when sampling depth."),
+	ECVF_RenderThreadSafe
+);
+
 enum class EContactShadowsIntensityMode
 {
 	PrimitiveFlag,
@@ -162,6 +170,7 @@ class FScreenSpaceShadowsBendCS : public FGlobalShader
 		SHADER_PARAMETER(FVector4f, LightCoordinate)
 		SHADER_PARAMETER(FIntVector, WaveOffset)
 		SHADER_PARAMETER(uint32, IgnoreEdgePixels)
+		SHADER_PARAMETER(uint32, UseHalfPixelOffset)
 	END_SHADER_PARAMETER_STRUCT()
 
 	class FIntensityModeDim : SHADER_PERMUTATION_ENUM_CLASS("DIM_INTENSITY_MODE", EContactShadowsIntensityMode);
@@ -442,6 +451,7 @@ void RenderScreenSpaceShadowsBend(
 			PassParameters->WaveOffset = FIntVector(Dispatch.WaveOffset_Shader[0], Dispatch.WaveOffset_Shader[1], 0);
 
 			PassParameters->IgnoreEdgePixels = GBendShadowsIgnoreEdgePixels ? 1u : 0u;
+			PassParameters->UseHalfPixelOffset = GBendShadowsUseHalfPixelOffset ? 1u : 0u;
 			
 			FScreenSpaceShadowsBendCS::FPermutationDomain PermutationVector;
 			PermutationVector.Set<FScreenSpaceShadowsBendCS::FIntensityModeDim>((EContactShadowsIntensityMode)GContactShadowsIntensityMode);

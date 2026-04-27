@@ -27,7 +27,7 @@ int3 WaveOffset;
 RWTexture2D<float> OutputTexture;
 SamplerState PointBorderSampler;
 
-DispatchParameters SetupBendDispatchParameters(Texture2D DepthTexture, float NearDepthVal, float FarDepthVal, float SurfaceThickness, uint IgnoreEdgePixelsParam)
+DispatchParameters SetupBendDispatchParameters(Texture2D DepthTexture, float NearDepthVal, float FarDepthVal, float SurfaceThickness, uint IgnoreEdgePixelsParam, uint UseHalfPixelOffsetParam)
 {
 	DispatchParameters Parameters;
 	Parameters.SetDefaults();
@@ -46,6 +46,7 @@ DispatchParameters SetupBendDispatchParameters(Texture2D DepthTexture, float Nea
 	Parameters.SurfaceThickness = SurfaceThickness;
 	
 	Parameters.IgnoreEdgePixels = (IgnoreEdgePixelsParam != 0);
+	Parameters.UseHalfPixelOffset = (UseHalfPixelOffsetParam != 0);
 
 	return Parameters;
 }
@@ -81,6 +82,7 @@ float ContactShadowIntensityFadeStart;
 float ContactShadowIntensityFadeOneOverLength;
 float SurfaceThickness;
 uint IgnoreEdgePixels;
+uint UseHalfPixelOffset;
 
 uint DownsampleFactor;
 int4 ScissorRectMinAndSize;
@@ -168,7 +170,7 @@ void ScreenSpaceShadowsBendCS(
 #else
 	Texture2D DepthTexture = SceneTexturesStruct.SceneDepthTexture;
 #endif
-	DispatchParameters Parameters = SetupBendDispatchParameters(DepthTexture, NearDepthValue, FarDepthValue, SurfaceThickness, IgnoreEdgePixels);
+	DispatchParameters Parameters = SetupBendDispatchParameters(DepthTexture, NearDepthValue, FarDepthValue, SurfaceThickness, IgnoreEdgePixels, UseHalfPixelOffset);
 
 	float Result;
 	int2 ResultXY;
