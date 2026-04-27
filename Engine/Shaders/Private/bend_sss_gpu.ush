@@ -599,10 +599,14 @@ struct DispatchParameters
 		float result = 0;
 
 		// Take the average of 4 samples, this is useful to reduces aliasing noise in the source depth, especially with long shadows.
-		result = dot(shadow_value, 0.25);
+		const float averaged_shadow = dot(shadow_value, 0.25);
 
 		// If the first samples are always producing a hard shadow, then compute this value separately.
-		result = min(hard_shadow, result);
+		result = min(hard_shadow, averaged_shadow);
+
+		// In backlit regions, apply a small uniform filter across hard + soft terms to reduce artifacts.
+		const float uniform_filtered_shadow = (hard_shadow + shadow_value.x + shadow_value.y + shadow_value.z + shadow_value.w) * 0.2;
+		result = lerp(result, uniform_filtered_shadow, backlit);
 
 		//write the result
 		{
