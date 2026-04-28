@@ -101,6 +101,7 @@ float BacklitThicknessScale;
 float BacklitNoLStart;
 float BacklitNoLEnd;
 float BacklitFilterStrength;
+int BacklitFilterKernelRadius;
 float BilateralDepthSharpness;
 float BilateralNormalThreshold;
 uint IgnoreEdgePixels;
@@ -264,7 +265,8 @@ void ScreenSpaceShadowsBendFilterCS(
 	Backlit = saturate((BacklitNoLStart - NoL) / NoLRange);
 #endif
 
-	if (Backlit <= 0.0f || BacklitFilterStrength <= 0.0f)
+	const int KernelRadius = max(BacklitFilterKernelRadius, 0);
+	if (Backlit <= 0.0f || BacklitFilterStrength <= 0.0f || KernelRadius <= 0)
 	{
 		OutputFilteredTexture[PixelXY] = CenterShadow;
 		return;
@@ -273,9 +275,9 @@ void ScreenSpaceShadowsBendFilterCS(
 	float WeightedSum = 0.0f;
 	float WeightTotal = 0.0f;
 
-	[unroll] for (int OffsetY = -1; OffsetY <= 1; ++OffsetY)
+	[loop] for (int OffsetY = -KernelRadius; OffsetY <= KernelRadius; ++OffsetY)
 	{
-		[unroll] for (int OffsetX = -1; OffsetX <= 1; ++OffsetX)
+		[loop] for (int OffsetX = -KernelRadius; OffsetX <= KernelRadius; ++OffsetX)
 		{
 			const int2 NeighborXY = clamp(PixelXY + int2(OffsetX, OffsetY), ScissorMin, ScissorMax);
 			const float NeighborShadow = InputTexture[NeighborXY];

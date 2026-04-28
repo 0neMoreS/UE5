@@ -605,8 +605,8 @@ struct DispatchParameters
 		result = min(hard_shadow, averaged_shadow);
 
 		// In backlit regions, apply a small uniform filter across hard + soft terms to reduce artifacts.
-		const float uniform_filtered_shadow = (hard_shadow + shadow_value.x + shadow_value.y + shadow_value.z + shadow_value.w) * 0.2;
-		result = lerp(result, uniform_filtered_shadow, backlit);
+		// const float uniform_filtered_shadow = (hard_shadow + shadow_value.x + shadow_value.y + shadow_value.z + shadow_value.w) * 0.2;
+		// result = lerp(result, uniform_filtered_shadow, backlit);
 
 		//write the result
 		{

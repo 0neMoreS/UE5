@@ -41,7 +41,7 @@ static FAutoConsoleVariableRef CVarBendShadowsOverrideSurfaceThickness(
 	ECVF_RenderThreadSafe
 );
 
-static float GBendShadowsBacklitThicknessScale = 2.0f;
+static float GBendShadowsBacklitThicknessScale = 1.0f;
 static FAutoConsoleVariableRef CVarBendShadowsBacklitThicknessScale(
 	TEXT("r.ContactShadows.Bend.BacklitThicknessScale"),
 	GBendShadowsBacklitThicknessScale,
@@ -86,6 +86,14 @@ static FAutoConsoleVariableRef CVarBendShadowsBacklitFilterStrength(
 	TEXT("r.ContactShadows.Bend.BacklitFilterStrength"),
 	GBendShadowsBacklitFilterStrength,
 	TEXT("Blending strength for the backlit bilateral filter pass. 0 disables the filter."),
+	ECVF_RenderThreadSafe
+);
+
+static int32 GBendShadowsBacklitFilterKernelRadius = 5;
+static FAutoConsoleVariableRef CVarBendShadowsBacklitFilterKernelRadius(
+	TEXT("r.ContactShadows.Bend.BacklitFilterKernelRadius"),
+	GBendShadowsBacklitFilterKernelRadius,
+	TEXT("Kernel radius for the Bend backlit bilateral filter pass. 0 disables spatial filtering."),
 	ECVF_RenderThreadSafe
 );
 
@@ -262,6 +270,7 @@ class FScreenSpaceShadowsBendFilterCS : public FGlobalShader
 		SHADER_PARAMETER(float, BacklitNoLStart)
 		SHADER_PARAMETER(float, BacklitNoLEnd)
 		SHADER_PARAMETER(float, BacklitFilterStrength)
+		SHADER_PARAMETER(int32, BacklitFilterKernelRadius)
 		SHADER_PARAMETER(float, BilateralDepthSharpness)
 		SHADER_PARAMETER(float, BilateralNormalThreshold)
 		SHADER_PARAMETER(FIntRect, ScissorRectMinAndSize)
@@ -571,6 +580,7 @@ void RenderScreenSpaceShadowsBend(
 		PassParameters->BacklitNoLStart = GBendShadowsBacklitNoLStart;
 		PassParameters->BacklitNoLEnd = GBendShadowsBacklitNoLEnd;
 		PassParameters->BacklitFilterStrength = GBendShadowsBacklitFilterStrength;
+		PassParameters->BacklitFilterKernelRadius = FMath::Clamp(GBendShadowsBacklitFilterKernelRadius, 0, 16);
 		PassParameters->BilateralDepthSharpness = GBendShadowsBilateralDepthSharpness;
 		PassParameters->BilateralNormalThreshold = FMath::Clamp(GBendShadowsBilateralNormalThreshold, 0.0f, 0.9999f);
 		PassParameters->ScissorRectMinAndSize = FIntRect(ScissorRect.Min, ScissorRect.Size());
