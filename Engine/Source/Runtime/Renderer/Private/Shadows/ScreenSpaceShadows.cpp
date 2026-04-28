@@ -81,6 +81,30 @@ static FAutoConsoleVariableRef CVarBendShadowsUseHalfPixelOffset(
 	ECVF_RenderThreadSafe
 );
 
+static float GBendShadowsBacklitFilterStrength = 1.0f;
+static FAutoConsoleVariableRef CVarBendShadowsBacklitFilterStrength(
+	TEXT("r.ContactShadows.Bend.BacklitFilterStrength"),
+	GBendShadowsBacklitFilterStrength,
+	TEXT("Blending strength for the backlit bilateral filter pass. 0 disables the filter."),
+	ECVF_RenderThreadSafe
+);
+
+static float GBendShadowsBilateralDepthSharpness = 400.0f;
+static FAutoConsoleVariableRef CVarBendShadowsBilateralDepthSharpness(
+	TEXT("r.ContactShadows.Bend.BilateralDepthSharpness"),
+	GBendShadowsBilateralDepthSharpness,
+	TEXT("Depth weighting sharpness for the Bend backlit bilateral filter pass."),
+	ECVF_RenderThreadSafe
+);
+
+static float GBendShadowsBilateralNormalThreshold = 0.8f;
+static FAutoConsoleVariableRef CVarBendShadowsBilateralNormalThreshold(
+	TEXT("r.ContactShadows.Bend.BilateralNormalThreshold"),
+	GBendShadowsBilateralNormalThreshold,
+	TEXT("Normal similarity threshold [0,1] for the Bend backlit bilateral filter pass."),
+	ECVF_RenderThreadSafe
+);
+
 enum class EContactShadowsIntensityMode
 {
 	PrimitiveFlag,
@@ -123,6 +147,8 @@ extern void GetLightContactShadowParameters(const FLightSceneProxy* Proxy, float
 
 const int32 GScreenSpaceShadowsTileSizeX = 8;
 const int32 GScreenSpaceShadowsTileSizeY = 8;
+const int32 GBendShadowsFilterTileSizeX = 8;
+const int32 GBendShadowsFilterTileSizeY = 8;
 
 int32 GetScreenSpaceShadowDownsampleFactor()
 {
@@ -221,6 +247,44 @@ class FScreenSpaceShadowsBendCS : public FGlobalShader
 };
 
 IMPLEMENT_GLOBAL_SHADER(FScreenSpaceShadowsBendCS, "/Engine/Private/ScreenSpaceShadows.usf", "ScreenSpaceShadowsBendCS", SF_Compute);
+
+class FScreenSpaceShadowsBendFilterCS : public FGlobalShader
+{
+	DECLARE_GLOBAL_SHADER(FScreenSpaceShadowsBendFilterCS);
+	SHADER_USE_PARAMETER_STRUCT(FScreenSpaceShadowsBendFilterCS, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, InputTexture)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, OutputFilteredTexture)
+		SHADER_PARAMETER_STRUCT_INCLUDE(FSceneTextureShaderParameters, SceneTextures)
+		SHADER_PARAMETER_STRUCT_REF(FViewUniformShaderParameters, View)
+		SHADER_PARAMETER(FVector3f, LightDirection)
+		SHADER_PARAMETER(float, BacklitNoLStart)
+		SHADER_PARAMETER(float, BacklitNoLEnd)
+		SHADER_PARAMETER(float, BacklitFilterStrength)
+		SHADER_PARAMETER(float, BilateralDepthSharpness)
+		SHADER_PARAMETER(float, BilateralNormalThreshold)
+		SHADER_PARAMETER(FIntRect, ScissorRectMinAndSize)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return true;
+	}
+
+	static void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment)
+	{
+		OutEnvironment.SetDefine(TEXT("THREADGROUP_SIZEX"), GBendShadowsFilterTileSizeX);
+		OutEnvironment.SetDefine(TEXT("THREADGROUP_SIZEY"), GBendShadowsFilterTileSizeY);
+		OutEnvironment.SetDefine(TEXT("FORCE_DEPTH_TEXTURE_READS"), 1);
+		OutEnvironment.SetDefine(TEXT("PLATFORM_SUPPORTS_TYPED_UAV_LOAD"), (int32)RHISupports4ComponentUAVReadWrite(Parameters.Platform));
+		OutEnvironment.SetDefine(TEXT("BEND_SSS"), 1);
+
+		OutEnvironment.CompilerFlags.Add(CFLAG_ForceDXC);
+	}
+};
+
+IMPLEMENT_GLOBAL_SHADER(FScreenSpaceShadowsBendFilterCS, "/Engine/Private/ScreenSpaceShadows.usf", "ScreenSpaceShadowsBendFilterCS", SF_Compute);
 
 class FScreenSpaceShadowsUpsamplePS : public FGlobalShader
 {
@@ -418,12 +482,14 @@ void RenderScreenSpaceShadowsBend(
 	const FIntPoint BufferSize = View.GetSceneTexturesConfig().Extent;
 	FRDGTextureDesc Desc(FRDGTextureDesc::Create2D(BufferSize, PF_R16F, FClearValueBinding::None, TexCreate_UAV | TexCreate_ShaderResource));
 	FRDGTextureRef ShadowsTexture = GraphBuilder.CreateTexture(Desc, TEXT("ScreenSpaceShadows"));
+	FRDGTextureRef FilteredShadowsTexture = GraphBuilder.CreateTexture(Desc, TEXT("ScreenSpaceShadowsFiltered"));
 
 	const FRDGTextureDesc& DepthDesc = SceneTextures.Depth.Resolve->Desc;
+	const FLightSceneProxy* LightProxy = LightSceneInfo->Proxy;
+	FLightRenderParameters LightParameters;
+	LightProxy->GetLightShaderParameters(LightParameters);
 
 	{
-		const FLightSceneProxy* LightProxy = LightSceneInfo->Proxy;
-
 		const FMatrix ViewProjection = View.ViewMatrices.GetViewProjectionMatrix();
 		const FVector4 LightDirection4 = FVector4(-LightProxy->GetDirection(), 0.0f);
 		const FVector4 LightDirection4Clip = ViewProjection.TransformFVector4(LightDirection4);
@@ -454,9 +520,6 @@ void RenderScreenSpaceShadowsBend(
 
 			PassParameters->ScissorRectMinAndSize = FIntRect(ScissorRect.Min, ScissorRect.Size());
 			PassParameters->DownsampleFactor = DownsampleFactor;
-
-			FLightRenderParameters LightParameters;
-			LightProxy->GetLightShaderParameters(LightParameters);
 
 			PassParameters->LightDirection = LightParameters.Direction;
 
@@ -498,6 +561,33 @@ void RenderScreenSpaceShadowsBend(
 		}
 	}
 
+	{
+		FScreenSpaceShadowsBendFilterCS::FParameters* PassParameters = GraphBuilder.AllocParameters<FScreenSpaceShadowsBendFilterCS::FParameters>();
+		PassParameters->InputTexture = ShadowsTexture;
+		PassParameters->OutputFilteredTexture = GraphBuilder.CreateUAV(FilteredShadowsTexture);
+		PassParameters->SceneTextures = SceneTextures.GetSceneTextureShaderParameters(View.GetFeatureLevel());
+		PassParameters->View = View.ViewUniformBuffer;
+		PassParameters->LightDirection = LightParameters.Direction;
+		PassParameters->BacklitNoLStart = GBendShadowsBacklitNoLStart;
+		PassParameters->BacklitNoLEnd = GBendShadowsBacklitNoLEnd;
+		PassParameters->BacklitFilterStrength = GBendShadowsBacklitFilterStrength;
+		PassParameters->BilateralDepthSharpness = GBendShadowsBilateralDepthSharpness;
+		PassParameters->BilateralNormalThreshold = FMath::Clamp(GBendShadowsBilateralNormalThreshold, 0.0f, 0.9999f);
+		PassParameters->ScissorRectMinAndSize = FIntRect(ScissorRect.Min, ScissorRect.Size());
+
+		auto ComputeShader = View.ShaderMap->GetShader<FScreenSpaceShadowsBendFilterCS>();
+		const uint32 GroupSizeX = FMath::DivideAndRoundUp(ScissorRect.Width(), GBendShadowsFilterTileSizeX);
+		const uint32 GroupSizeY = FMath::DivideAndRoundUp(ScissorRect.Height(), GBendShadowsFilterTileSizeY);
+
+		FComputeShaderUtils::AddPass(
+			GraphBuilder,
+			RDG_EVENT_NAME("ScreenSpaceShadowing (Bend Filter)"),
+			bAsyncCompute ? ERDGPassFlags::AsyncCompute : ERDGPassFlags::Compute,
+			ComputeShader,
+			PassParameters,
+			FIntVector(GroupSizeX, GroupSizeY, 1));
+	}
+
 	UpsampleScreenSpaceShadows(
 		GraphBuilder,
 		SceneTextures,
@@ -505,7 +595,7 @@ void RenderScreenSpaceShadowsBend(
 		ScissorRect,
 		bProjectingForForwardShading,
 		LightSceneInfo,
-		FScreenPassTexture(ShadowsTexture, ScissorRect),
+		FScreenPassTexture(FilteredShadowsTexture, ScissorRect),
 		DownsampleFactor,
 		ScreenShadowMaskTexture);
 }

@@ -26,6 +26,8 @@ float4 LightCoordinate;
 int3 WaveOffset;
 
 RWTexture2D<float> OutputTexture;
+Texture2D<float> InputTexture;
+RWTexture2D<float> OutputFilteredTexture;
 SamplerState PointBorderSampler;
 
 DispatchParameters SetupBendDispatchParameters(
@@ -98,6 +100,9 @@ float SurfaceThickness;
 float BacklitThicknessScale;
 float BacklitNoLStart;
 float BacklitNoLEnd;
+float BacklitFilterStrength;
+float BilateralDepthSharpness;
+float BilateralNormalThreshold;
 uint IgnoreEdgePixels;
 uint UseHalfPixelOffset;
 
@@ -218,6 +223,83 @@ void ScreenSpaceShadowsBendCS(
 #endif
 
 	OutputTexture[ResultXY] = 1 - (1 - Result) * ShadowOcclusion;
+}
+
+[numthreads(THREADGROUP_SIZEX, THREADGROUP_SIZEY, 1)]
+void ScreenSpaceShadowsBendFilterCS(
+	uint3 GroupId : SV_GroupID,
+	uint3 DispatchThreadId : SV_DispatchThreadID,
+	uint3 GroupThreadId : SV_GroupThreadID)
+{
+	const int2 DispatchXY = int2(DispatchThreadId.xy);
+	const int2 ScissorMin = ScissorRectMinAndSize.xy;
+	const int2 ScissorSize = ScissorRectMinAndSize.zw;
+
+	if (DispatchXY.x >= ScissorSize.x || DispatchXY.y >= ScissorSize.y)
+	{
+		return;
+	}
+
+	const int2 PixelXY = DispatchXY + ScissorMin;
+	const int2 ScissorMax = ScissorMin + ScissorSize - 1;
+	const float2 InvBufferSize = View.BufferSizeAndInvSize.zw;
+	const float2 PixelUV = (float2(PixelXY) + 0.5f) * InvBufferSize;
+
+#if SHADING_PATH_MOBILE
+	Texture2D DepthTexture = MobileSceneTextures.SceneDepthTexture;
+#else
+	Texture2D DepthTexture = SceneTexturesStruct.SceneDepthTexture;
+#endif
+
+	float CenterShadow = InputTexture[PixelXY];
+	const float CenterDepth = DepthTexture.Load(int3(PixelXY, 0)).r;
+
+	float Backlit = 0.0f;
+	float3 CenterNormal = float3(0.0f, 0.0f, 1.0f);
+#if SHADING_PATH_DEFERRED
+	CenterNormal = normalize(GetGBufferData(PixelUV).WorldNormal);
+	const float3 ToLightDirection = -normalize(LightDirection);
+	const float NoL = dot(CenterNormal, ToLightDirection);
+	const float NoLRange = max(BacklitNoLStart - BacklitNoLEnd, 1e-4f);
+	Backlit = saturate((BacklitNoLStart - NoL) / NoLRange);
+#endif
+
+	if (Backlit <= 0.0f || BacklitFilterStrength <= 0.0f)
+	{
+		OutputFilteredTexture[PixelXY] = CenterShadow;
+		return;
+	}
+
+	float WeightedSum = 0.0f;
+	float WeightTotal = 0.0f;
+
+	[unroll] for (int OffsetY = -1; OffsetY <= 1; ++OffsetY)
+	{
+		[unroll] for (int OffsetX = -1; OffsetX <= 1; ++OffsetX)
+		{
+			const int2 NeighborXY = clamp(PixelXY + int2(OffsetX, OffsetY), ScissorMin, ScissorMax);
+			const float NeighborShadow = InputTexture[NeighborXY];
+			const float NeighborDepth = DepthTexture.Load(int3(NeighborXY, 0)).r;
+
+			float NormalWeight = 1.0f;
+#if SHADING_PATH_DEFERRED
+			const float2 NeighborUV = (float2(NeighborXY) + 0.5f) * InvBufferSize;
+			const float3 NeighborNormal = normalize(GetGBufferData(NeighborUV).WorldNormal);
+			NormalWeight = saturate((dot(CenterNormal, NeighborNormal) - BilateralNormalThreshold) / max(1.0f - BilateralNormalThreshold, 1e-4f));
+#endif
+
+			const float DepthDiff = abs(NeighborDepth - CenterDepth);
+			const float DepthWeight = exp(-DepthDiff * BilateralDepthSharpness);
+			const float Weight = DepthWeight * NormalWeight;
+
+			WeightedSum += NeighborShadow * Weight;
+			WeightTotal += Weight;
+		}
+	}
+
+	const float FilteredShadow = (WeightTotal > 0.0f) ? (WeightedSum / WeightTotal) : CenterShadow;
+	const float BlendWeight = saturate(Backlit * BacklitFilterStrength);
+	OutputFilteredTexture[PixelXY] = lerp(CenterShadow, FilteredShadow, BlendWeight);
 }
 
 #endif // BEND_SSS
