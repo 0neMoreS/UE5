@@ -28,6 +28,7 @@ float CastScreenSpaceShadowRay(
 	const float StepOffset = Dither - 0.5f;
 	const float Step = 1.0 / NumSteps;
 
+	// 可能解决 artifact 方案，但是会让估计变厚，阴影变黑
 	const float CompareTolerance = abs(RayDepth.z - RayStart.z) * Step * CompareToleranceScale;
 
 	float SampleTime = StepOffset * Step + Step;
